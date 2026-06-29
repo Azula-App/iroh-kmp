@@ -33,6 +33,25 @@ uniffi {
     }
 }
 
+// --- Embed the host JVM native lib into the MAIN jvm jar --------------------
+// Gobley publishes the JVM dylib only in a per-host "rust-runtime" *classifier*
+// jar, and its module metadata doesn't list that jar in the runtime variant — so
+// a plain-metadata consumer like Amper never puts it on the classpath, the JNA
+// binding fails (UnsatisfiedLinkError), and the desktop app silently falls back
+// to the demo transport. Stage the dylib into the main jvm jar at the JNA
+// resource path (`<jna-platform>/libiroh_kmp.dylib`) so any consumer loads it —
+// mirroring how the Android AAR bundles its .so. (Host: macOS arm64.)
+val jvmNativeResDir = layout.buildDirectory.dir("jvmNativeResources")
+val embedJvmNativeLib = tasks.register<Copy>("embedJvmNativeLib") {
+    val triple = "aarch64-apple-darwin"
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    from(layout.projectDirectory.dir("target/$triple/debug")) { include("libiroh_kmp.dylib") }
+    from(layout.projectDirectory.dir("target/$triple/release")) { include("libiroh_kmp.dylib") }
+    into(jvmNativeResDir.map { it.dir("darwin-aarch64") })
+    dependsOn(tasks.matching { it.name.startsWith("cargoBuild") && it.name.contains("MacOSArm64") })
+}
+tasks.matching { it.name == "jvmProcessResources" }.configureEach { dependsOn(embedJvmNativeLib) }
+
 kotlin {
     androidTarget {
         publishLibraryVariants("release")
@@ -53,6 +72,10 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(libs.kotlinx.coroutines.core)
+        }
+        jvmMain {
+            // Carry the host dylib inside the main jvm jar (see embedJvmNativeLib).
+            resources.srcDir(jvmNativeResDir)
         }
     }
 }
