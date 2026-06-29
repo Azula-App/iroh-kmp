@@ -1,0 +1,7 @@
+# iroh's C deps (blake3/ring) are compiled against the current iOS SDK, which
+# references `___chkstk_darwin` — only resolvable at iOS >= 13. Rust otherwise
+# links iOS at min 10.0, producing an "undefined symbol" link error. Pinning the
+# deployment target keeps the C compile and the Rust link in agreement.
+# (Harmless on Android/JVM targets, which ignore it.)
+[env]
+IPHONEOS_DEPLOYMENT_TARGET = "13.0"
