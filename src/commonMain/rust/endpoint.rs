@@ -120,3 +120,12 @@ impl IrohEndpoint {
         self.inner.close().await;
     }
 }
+
+/// Decode the peer's hex node id from a shareable ticket, without dialing. Lets
+/// the app key/name a conversation after the peer it's connecting out to (inbound
+/// connections already expose `remote_id`).
+#[uniffi::export]
+pub fn node_id_from_ticket(ticket: String) -> Result<String, IrohError> {
+    let t = EndpointTicket::from_str(&ticket).map_err(IrohError::msg)?;
+    Ok(t.endpoint_addr().id.to_string())
+}
