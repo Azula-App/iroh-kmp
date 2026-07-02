@@ -90,7 +90,7 @@ impl IrohEndpoint {
             .await
             .map_err(IrohError::msg)?;
         let (send, recv) = conn.open_bi().await.map_err(IrohError::msg)?;
-        Ok(Arc::new(IrohStream::new(send, recv)))
+        Ok(Arc::new(IrohStream::new(conn, send, recv)))
     }
 
     /// Block until the next inbound connection completes its handshake and opens
@@ -110,7 +110,7 @@ impl IrohEndpoint {
         Ok(Some(IncomingConn {
             remote_id,
             alpn,
-            stream: Arc::new(IrohStream::new(send, recv)),
+            stream: Arc::new(IrohStream::new(conn, send, recv)),
         }))
     }
 
