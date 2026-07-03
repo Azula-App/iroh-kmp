@@ -38,17 +38,66 @@ uniffi {
 // jar, and its module metadata doesn't list that jar in the runtime variant — so
 // a plain-metadata consumer like Amper never puts it on the classpath, the JNA
 // binding fails (UnsatisfiedLinkError), and the desktop app silently falls back
-// to the demo transport. Stage the dylib into the main jvm jar at the JNA
-// resource path (`<jna-platform>/libiroh_kmp.dylib`) so any consumer loads it —
-// mirroring how the Android AAR bundles its .so. (Host: macOS arm64.)
+// to the demo transport. Stage the dylib/so/dll into the main jvm jar at the JNA
+// resource path (`<jna-platform>/lib*`) so any consumer loads it — mirroring how
+// the Android AAR bundles its .so.
+//
+// The host triple/JNA-platform-dir/lib-filename below are derived from
+// os.name/os.arch rather than hardcoded, so this works on any host — a stale
+// hardcoded triple would silently ship an *empty* jvmNativeResources dir on any
+// other host, and the failure would only surface much later as an
+// UnsatisfiedLinkError at runtime.
+data class HostNativeLib(val rustTriple: String, val jnaPlatformDir: String, val libFileName: String)
+
+fun hostNativeLib(): HostNativeLib {
+    val osName = System.getProperty("os.name", "").lowercase()
+    val osArch = System.getProperty("os.arch", "").lowercase()
+    val arch = when (osArch) {
+        "aarch64", "arm64" -> "aarch64"
+        "x86_64", "amd64" -> "x86_64"
+        else -> error("embedJvmNativeLib: unsupported host arch '$osArch'")
+    }
+    return when {
+        osName.contains("mac") || osName.contains("darwin") -> HostNativeLib(
+            rustTriple = "$arch-apple-darwin",
+            jnaPlatformDir = "darwin-${if (arch == "x86_64") "x86-64" else arch}",
+            libFileName = "libiroh_kmp.dylib",
+        )
+        osName.contains("linux") -> HostNativeLib(
+            rustTriple = "$arch-unknown-linux-gnu",
+            jnaPlatformDir = "linux-${if (arch == "x86_64") "x86-64" else arch}",
+            libFileName = "libiroh_kmp.so",
+        )
+        osName.contains("windows") -> HostNativeLib(
+            rustTriple = "x86_64-pc-windows-msvc",
+            jnaPlatformDir = "win32-x86-64",
+            libFileName = "iroh_kmp.dll",
+        )
+        else -> error("embedJvmNativeLib: unsupported host OS '$osName'")
+    }
+}
+
 val jvmNativeResDir = layout.buildDirectory.dir("jvmNativeResources")
 val embedJvmNativeLib = tasks.register<Copy>("embedJvmNativeLib") {
-    val triple = "aarch64-apple-darwin"
+    val native = hostNativeLib()
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
-    from(layout.projectDirectory.dir("target/$triple/debug")) { include("libiroh_kmp.dylib") }
-    from(layout.projectDirectory.dir("target/$triple/release")) { include("libiroh_kmp.dylib") }
-    into(jvmNativeResDir.map { it.dir("darwin-aarch64") })
-    dependsOn(tasks.matching { it.name.startsWith("cargoBuild") && it.name.contains("MacOSArm64") })
+    from(layout.projectDirectory.dir("target/${native.rustTriple}/debug")) { include(native.libFileName) }
+    from(layout.projectDirectory.dir("target/${native.rustTriple}/release")) { include(native.libFileName) }
+    into(jvmNativeResDir.map { it.dir(native.jnaPlatformDir) })
+    dependsOn(tasks.matching { it.name.startsWith("cargoBuild") })
+
+    // Fail loudly instead of silently shipping a jar with no native lib for this
+    // host (which would only surface later as an UnsatisfiedLinkError).
+    doLast {
+        val copied = jvmNativeResDir.get().dir(native.jnaPlatformDir).file(native.libFileName).asFile
+        check(copied.exists()) {
+            "embedJvmNativeLib: expected native library not found at ${copied.absolutePath} " +
+                "(host rust target ${native.rustTriple}). The jvm jar would silently ship without " +
+                "it, causing UnsatisfiedLinkError at runtime instead of failing the build now. " +
+                "Check that `cargo build` produced " +
+                "target/${native.rustTriple}/{debug,release}/${native.libFileName}."
+        }
+    }
 }
 tasks.matching { it.name == "jvmProcessResources" }.configureEach { dependsOn(embedJvmNativeLib) }
 

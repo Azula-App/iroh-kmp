@@ -30,7 +30,8 @@ are generated at build time into the `app.azula.iroh` package.
 - `endpoint.myTicket()` — online + shareable ticket string
 - `endpoint.connect(ticket, alpn)` → `IrohStream`
 - `endpoint.acceptNext()` → `IncomingConn?` (loop into a Flow)
-- `IrohStream.sendBytes(...)`, `recv(max)`, `close()`
+- `IrohStream.sendBytes(...)`, `recv(max)`, `rttMs()`, `finish()` (named to avoid
+  colliding with UniFFI's `Disposable.close()`)
 
 On Android, call `IrohAndroid.installAndroidContext(applicationContext)` once at
 startup before binding (iroh's DNS resolver needs the JavaVM + app context).
@@ -45,7 +46,8 @@ export JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.54.21/Contents/Home
 ./gradlew publishToMavenLocal
 ```
 
-Produces `app.azula.iroh:iroh-kmp:0.1.0` (+ per-target `-android`, `-jvm`,
+Produces `app.azula.iroh:iroh-kmp:<version>` (see `version` in `build.gradle.kts`;
+currently `0.1.2`) (+ per-target `-android`, `-jvm`,
 `-iosarm64`, …) under `~/.m2/repository/app/azula/iroh/`.
 
 ## Toolchain versions
