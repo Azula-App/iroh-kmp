@@ -12,7 +12,7 @@ plugins {
 }
 
 group = "app.azula.iroh"
-version = "0.1.2"
+version = "0.1.3"
 
 // The Cargo.toml at the project root is picked up automatically by the cargo
 // plugin; it cross-compiles the crate for every Kotlin target declared below.
