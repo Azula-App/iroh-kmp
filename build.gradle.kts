@@ -26,6 +26,25 @@ cargo {
     }
 }
 
+// --- Don't cross-compile Linux/Windows JVM variants we never publish --------
+// embedRustLibrary above only controls which target's output gets embedded in
+// the jvm jar — Gobley still wires cargoBuildLinux*/cargoBuildMinGW* into the
+// task graph for `publishToMavenLocal` (they'd back per-host "rust-runtime"
+// classifier jars), so they still run and fail on a Mac (no
+// aarch64-linux-gnu-gcc cross-linker; and even where a mingw-w64 toolchain
+// happens to be on PATH for unrelated reasons, this crate's huge dependency
+// tree hits mingw's PE export-table limit — "export ordinal too large").
+// Only the Apple + Android targets are actually published/consumed
+// (azula-app depends on app.azula.iroh:iroh-kmp for those), so just disable
+// the Linux/Windows cargo builds outside of their native host — the same
+// idea as the iOS `GobleyHost.Platform.MacOS.isCurrent` gate below — instead
+// of requiring
+// `-x cargoBuildLinux… -x cargoBuildMinGW…` by hand on every other host.
+tasks.matching { it.name.startsWith("cargoBuildLinux") }
+    .configureEach { enabled = GobleyHost.Platform.Linux.isCurrent }
+tasks.matching { it.name.startsWith("cargoBuildMinGW") }
+    .configureEach { enabled = GobleyHost.Platform.Windows.isCurrent }
+
 uniffi {
     generateFromLibrary {
         // The package the generated bindings (IrohEndpoint, IrohStream, ...) land in.
