@@ -1,12 +1,17 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use iroh::endpoint::presets::{self, Preset as _};
-use iroh::{Endpoint, PublicKey, SecretKey, Signature};
+use iroh::{Endpoint, PublicKey, Signature, Watcher as _};
+#[cfg(test)]
+use iroh::SecretKey;
 use iroh_tickets::endpoint::EndpointTicket;
 use iroh_tickets::Ticket as _;
 
+use crate::config::EndpointOptions;
+use crate::connection::{IrohConnection, PathKind};
 use crate::error::IrohError;
+use crate::node_addr::NodeAddr;
+use crate::remote_info::{RemoteAddrInfo, RemoteInfo};
 use crate::stream::IrohStream;
 
 /// An accepted inbound connection: who dialed us, on which ALPN, and the
@@ -32,32 +37,42 @@ impl IrohEndpoint {
     /// a stable node id when provided. Uses the n0 production preset (relays +
     /// discovery). On Android, `IrohAndroid.installAndroidContext` must have been
     /// called first (iroh's DNS resolver needs the JavaVM + app context).
+    ///
+    /// A thin delegate to [`Self::bind_with`] with every option at its default; kept
+    /// separate because it's the common case and predates [`EndpointOptions`].
     #[uniffi::constructor(async_runtime = "tokio")]
     pub async fn bind(
         alpns: Vec<String>,
         secret_key: Option<Vec<u8>>,
     ) -> Result<Arc<Self>, IrohError> {
-        // An empty builder + a preset installs the crypto provider; layering the
-        // explicit options on top mirrors iroh-ffi's `Endpoint::bind`.
-        let mut builder = presets::N0.apply(iroh::endpoint::Builder::empty());
-        if let Some(bytes) = secret_key {
-            let key: [u8; 32] = bytes
-                .as_slice()
-                .try_into()
-                .map_err(|_| IrohError::Generic { msg: "secret key must be 32 bytes".into() })?;
-            builder = builder.secret_key(SecretKey::from_bytes(&key));
-        }
-        let alpns: Vec<Vec<u8>> = alpns.into_iter().map(String::into_bytes).collect();
-        builder = builder.alpns(alpns);
+        Self::bind_with(EndpointOptions {
+            alpns,
+            secret_key,
+            relay_mode: None,
+            address_lookup: true,
+            bind_addr: None,
+            external_addrs: None,
+            warm_up_online: true,
+        })
+        .await
+    }
 
+    /// Bind an endpoint from fully-specified [`EndpointOptions`]. See [`Self::bind`] for the
+    /// common case (n0 relays + discovery, no explicit bind address).
+    #[uniffi::constructor(async_runtime = "tokio")]
+    pub async fn bind_with(options: EndpointOptions) -> Result<Arc<Self>, IrohError> {
+        let warm_up_online = options.warm_up_online;
+        let builder = crate::config::builder_from_options(options)?;
         let inner = builder.bind().await.map_err(IrohError::msg)?;
 
-        // Bring discovery/relays up in the background so we're reachable without
-        // waiting for the first `my_ticket` call (mirrors the old transport).
-        let warm = inner.clone();
-        tokio::spawn(async move {
-            warm.online().await;
-        });
+        if warm_up_online {
+            // Bring discovery/relays up in the background so we're reachable without
+            // waiting for the first `my_ticket` call (mirrors the old transport).
+            let warm = inner.clone();
+            tokio::spawn(async move {
+                warm.online().await;
+            });
+        }
 
         Ok(Arc::new(IrohEndpoint { inner }))
     }
@@ -83,36 +98,67 @@ impl IrohEndpoint {
     /// Dial a peer by `ticket` on `alpn`, opening a fresh bidirectional stream.
     #[uniffi::method(async_runtime = "tokio")]
     pub async fn connect(&self, ticket: String, alpn: String) -> Result<Arc<IrohStream>, IrohError> {
+        let conn = self.connect_conn(ticket, alpn).await?;
+        conn.open_bi().await
+    }
+
+    /// Dial a peer by `ticket` on `alpn`, returning the established connection without
+    /// opening a stream. See [`Self::connect_addr`] and [`Self::connect_by_node_id`] for
+    /// dialing without a ticket, and [`Self::connect`] for the ticket+bi-stream convenience.
+    #[uniffi::method(async_runtime = "tokio")]
+    pub async fn connect_conn(&self, ticket: String, alpn: String) -> Result<Arc<IrohConnection>, IrohError> {
         let ticket = EndpointTicket::from_str(&ticket).map_err(IrohError::msg)?;
         let addr = ticket.endpoint_addr().clone();
-        let conn = self
-            .inner
-            .connect(addr, alpn.as_bytes())
-            .await
-            .map_err(IrohError::msg)?;
-        let (send, recv) = conn.open_bi().await.map_err(IrohError::msg)?;
-        Ok(Arc::new(IrohStream::new(conn, send, recv)))
+        let conn = self.inner.connect(addr, alpn.as_bytes()).await.map_err(IrohError::msg)?;
+        Ok(Arc::new(IrohConnection::new(conn)))
+    }
+
+    /// Dial a peer by its structured [`NodeAddr`] on `alpn`.
+    #[uniffi::method(async_runtime = "tokio")]
+    pub async fn connect_addr(&self, addr: NodeAddr, alpn: String) -> Result<Arc<IrohConnection>, IrohError> {
+        let addr: iroh::EndpointAddr = addr.try_into()?;
+        let conn = self.inner.connect(addr, alpn.as_bytes()).await.map_err(IrohError::msg)?;
+        Ok(Arc::new(IrohConnection::new(conn)))
+    }
+
+    /// Dial a peer by hex node id alone on `alpn`, relying on the endpoint's address
+    /// lookup service to resolve reachable addresses.
+    #[uniffi::method(async_runtime = "tokio")]
+    pub async fn connect_by_node_id(&self, node_id_hex: String, alpn: String) -> Result<Arc<IrohConnection>, IrohError> {
+        let id = PublicKey::from_str(&node_id_hex).map_err(IrohError::msg)?;
+        let conn = self.inner.connect(id, alpn.as_bytes()).await.map_err(IrohError::msg)?;
+        Ok(Arc::new(IrohConnection::new(conn)))
     }
 
     /// Block until the next inbound connection completes its handshake and opens
     /// a bidirectional stream. Returns `None` once the endpoint is closed; the
     /// Kotlin side loops this into a `Flow<IncomingConnection>`.
+    ///
+    /// Shares the accept queue with [`Self::accept_conn`] — both are single-consumer, so
+    /// don't call them concurrently expecting each to see every incoming connection.
     #[uniffi::method(async_runtime = "tokio")]
     pub async fn accept_next(&self) -> Result<Option<IncomingConn>, IrohError> {
+        let conn = match self.accept_conn().await? {
+            Some(conn) => conn,
+            None => return Ok(None),
+        };
+        let remote_id = conn.remote_node_id();
+        let alpn = conn.alpn();
+        let stream = conn.accept_bi().await?;
+        Ok(Some(IncomingConn { remote_id, alpn, stream }))
+    }
+
+    /// Block until the next inbound connection completes its handshake. Returns `None`
+    /// once the endpoint is closed. See [`Self::accept_next`]'s note on the shared queue.
+    #[uniffi::method(async_runtime = "tokio")]
+    pub async fn accept_conn(&self) -> Result<Option<Arc<IrohConnection>>, IrohError> {
         let incoming = match self.inner.accept().await {
             Some(incoming) => incoming,
             None => return Ok(None),
         };
         let accepting = incoming.accept().map_err(IrohError::msg)?;
         let conn = accepting.await.map_err(|e| IrohError::Generic { msg: format!("{e:?}") })?;
-        let remote_id = conn.remote_id().to_string();
-        let alpn = String::from_utf8_lossy(&conn.alpn().to_vec()).into_owned();
-        let (send, recv) = conn.accept_bi().await.map_err(IrohError::msg)?;
-        Ok(Some(IncomingConn {
-            remote_id,
-            alpn,
-            stream: Arc::new(IrohStream::new(conn, send, recv)),
-        }))
+        Ok(Some(Arc::new(IrohConnection::new(conn))))
     }
 
     /// Shut the endpoint down, closing all connections.
@@ -126,6 +172,95 @@ impl IrohEndpoint {
     /// `invitations.md`); verified by peers with [`verify_signature`].
     pub fn sign(&self, data: Vec<u8>) -> Vec<u8> {
         self.inner.secret_key().sign(&data).to_bytes().to_vec()
+    }
+
+    /// A snapshot of this endpoint's current addressing info (relay + direct addresses).
+    /// May be incomplete until [`Self::wait_online`] resolves; see [`Self::node_addr_updated`]
+    /// to wait for a change.
+    pub fn node_addr(&self) -> NodeAddr {
+        self.inner.addr().into()
+    }
+
+    /// Waits for this endpoint's addressing info to change, then returns the new snapshot.
+    #[uniffi::method(async_runtime = "tokio")]
+    pub async fn node_addr_updated(&self) -> NodeAddr {
+        let mut watcher = self.inner.watch_addr();
+        match watcher.updated().await {
+            Ok(addr) => addr.into(),
+            Err(_disconnected) => watcher.get().into(),
+        }
+    }
+
+    /// This endpoint's known direct (IP) addresses, as `"ip:port"` strings.
+    pub fn direct_addresses(&self) -> Vec<String> {
+        self.inner.addr().ip_addrs().map(ToString::to_string).collect()
+    }
+
+    /// The URL of a currently-connected home relay, if any.
+    pub fn home_relay(&self) -> Option<String> {
+        let mut watcher = self.inner.home_relay_status();
+        watcher.get().into_iter().find(|status| status.is_connected()).map(|status| status.url().to_string())
+    }
+
+    /// Wait until this endpoint is considered "online" (connected to at least one relay).
+    /// Pends forever if no relays are configured.
+    #[uniffi::method(async_runtime = "tokio")]
+    pub async fn wait_online(&self) {
+        self.inner.online().await;
+    }
+
+    /// Whether [`Self::shutdown`] has already been called.
+    pub fn is_closed(&self) -> bool {
+        self.inner.is_closed()
+    }
+
+    /// The local socket addresses this endpoint's sockets are bound to.
+    pub fn bound_sockets(&self) -> Vec<String> {
+        self.inner.bound_sockets().into_iter().map(|a| a.to_string()).collect()
+    }
+
+    /// Replace the ALPNs this endpoint accepts on incoming connections.
+    pub fn set_alpns(&self, alpns: Vec<String>) {
+        let alpns: Vec<Vec<u8>> = alpns.into_iter().map(String::into_bytes).collect();
+        self.inner.set_alpns(alpns);
+    }
+
+    /// Notify the endpoint of a potential network change (e.g. Android's
+    /// `ConnectivityManager` callbacks, which iroh can't observe on its own).
+    #[uniffi::method(async_runtime = "tokio")]
+    pub async fn network_change(&self) {
+        self.inner.network_change().await;
+    }
+
+    // TODO: expose endpoint metrics (metrics cargo feature)
+
+    /// Addressing info this endpoint currently knows about `node_id_hex`, or `None` if
+    /// it's unknown or the endpoint is closed. A snapshot in time, not a watcher.
+    #[uniffi::method(async_runtime = "tokio")]
+    pub async fn remote_info(&self, node_id_hex: String) -> Result<Option<RemoteInfo>, IrohError> {
+        let id = PublicKey::from_str(&node_id_hex).map_err(IrohError::msg)?;
+        let Some(info) = self.inner.remote_info(id).await else {
+            return Ok(None);
+        };
+        let node_id = info.id().to_string();
+        let addrs = info
+            .into_addrs()
+            .map(|a| {
+                let usage = match a.usage() {
+                    iroh::endpoint::TransportAddrUsage::Active => "active",
+                    iroh::endpoint::TransportAddrUsage::Inactive => "inactive",
+                    _ => "unknown",
+                }
+                .to_string();
+                let (addr, kind) = match a.into_addr() {
+                    iroh::TransportAddr::Ip(sock) => (sock.to_string(), PathKind::Ip),
+                    iroh::TransportAddr::Relay(url) => (url.to_string(), PathKind::Relay),
+                    other => (other.to_string(), PathKind::Ip),
+                };
+                RemoteAddrInfo { addr, kind, usage }
+            })
+            .collect();
+        Ok(Some(RemoteInfo { node_id, addrs }))
     }
 }
 
@@ -172,9 +307,118 @@ pub fn ticket_from_bytes(bytes: Vec<u8>) -> Result<String, IrohError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::RelayModeOption;
 
     fn hex_decode(s: &str) -> Vec<u8> {
         (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+    }
+
+    /// Binds an offline-friendly endpoint: no relays, no address lookup, alpn `alpn`.
+    async fn bind_offline(alpn: &str) -> Arc<IrohEndpoint> {
+        IrohEndpoint::bind_with(EndpointOptions {
+            alpns: vec![alpn.into()],
+            secret_key: None,
+            relay_mode: Some(RelayModeOption::Disabled),
+            address_lookup: false,
+            bind_addr: None,
+            external_addrs: None,
+            warm_up_online: false,
+        })
+        .await
+        .expect("bind_with")
+    }
+
+    /// This endpoint's loopback [`NodeAddr`]: its bound port reachable via `127.0.0.1`,
+    /// sidestepping relay/address-lookup/net-report entirely for a fast, offline test.
+    fn loopback_addr(ep: &IrohEndpoint) -> NodeAddr {
+        let port = ep
+            .bound_sockets()
+            .into_iter()
+            .find_map(|s| s.parse::<std::net::SocketAddr>().ok())
+            .expect("at least one bound socket")
+            .port();
+        NodeAddr {
+            node_id: ep.node_id(),
+            relay_url: None,
+            direct_addresses: vec![format!("127.0.0.1:{port}")],
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn bind_with_defaults_matches_bind() {
+        let secret_key = vec![5u8; 32];
+        let via_bind = IrohEndpoint::bind(vec!["test/bind-with".into()], Some(secret_key.clone()))
+            .await
+            .expect("bind");
+        let via_bind_with = IrohEndpoint::bind_with(EndpointOptions {
+            alpns: vec!["test/bind-with".into()],
+            secret_key: Some(secret_key),
+            relay_mode: None,
+            address_lookup: true,
+            bind_addr: None,
+            external_addrs: None,
+            warm_up_online: true,
+        })
+        .await
+        .expect("bind_with");
+
+        assert_eq!(via_bind.node_id(), via_bind_with.node_id());
+        assert_eq!(via_bind.secret_key_bytes(), via_bind_with.secret_key_bytes());
+        assert!(!via_bind.is_closed());
+        assert!(!via_bind_with.is_closed());
+
+        via_bind.shutdown().await;
+        via_bind_with.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn connect_addr_bi_uni_and_datagram_roundtrip() {
+        let alpn = "test/conn";
+        let a = bind_offline(alpn).await;
+        let b = bind_offline(alpn).await;
+        let b_addr = loopback_addr(&b);
+
+        let accept_task = tokio::spawn({
+            let b = b.clone();
+            async move { b.accept_conn().await }
+        });
+        let conn_a = a.connect_addr(b_addr, alpn.into()).await.expect("connect_addr");
+        let conn_b = accept_task
+            .await
+            .expect("join")
+            .expect("accept_conn")
+            .expect("Some(conn)");
+
+        // Bidirectional stream roundtrip.
+        let bi_accept = tokio::spawn({
+            let conn_b = conn_b.clone();
+            async move { conn_b.accept_bi().await }
+        });
+        let bi_a = conn_a.open_bi().await.expect("open_bi");
+        bi_a.send_bytes(b"hello bi".to_vec()).await.expect("send_bytes");
+        bi_a.finish().await.expect("finish");
+        let bi_b = bi_accept.await.expect("join").expect("accept_bi");
+        assert_eq!(bi_b.read_to_end(1024).await.expect("read_to_end"), b"hello bi");
+
+        // Unidirectional stream roundtrip.
+        let uni_accept = tokio::spawn({
+            let conn_b = conn_b.clone();
+            async move { conn_b.accept_uni().await }
+        });
+        let uni_send = conn_a.open_uni().await.expect("open_uni");
+        uni_send.send_bytes(b"hello uni".to_vec()).await.expect("send_bytes");
+        uni_send.finish().await.expect("finish");
+        let uni_recv = uni_accept.await.expect("join").expect("accept_uni");
+        assert_eq!(uni_recv.read_to_end(1024).await.expect("read_to_end"), b"hello uni");
+
+        // Datagram roundtrip.
+        conn_a.send_datagram(b"hello dgram".to_vec()).await.expect("send_datagram");
+        assert_eq!(conn_b.read_datagram().await.expect("read_datagram"), b"hello dgram");
+
+        conn_a.shutdown(0, Vec::new()).expect("shutdown conn_a");
+        conn_b.shutdown(0, Vec::new()).expect("shutdown conn_b");
+        a.shutdown().await;
+        b.shutdown().await;
     }
 
     #[tokio::test(flavor = "current_thread")]
