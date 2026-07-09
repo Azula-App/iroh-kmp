@@ -25,6 +25,18 @@ version = providers.gradleProperty("VERSION_NAME").get()
 // plugin; it cross-compiles the crate for every Kotlin target declared below.
 
 cargo {
+    // Don't publish Gobley's per-host JVM "rust-runtime" classifier jar (e.g.
+    // iroh-kmp-jvm-<version>-darwin-aarch64.jar). It contains only
+    // libiroh_kmp.dylib, which embedJvmNativeLib already stages into the MAIN jvm
+    // jar at the JNA resource path — and unlike Gobley's classifier jar, that main
+    // jar IS on every consumer's classpath (Gobley never wires the classifier jar
+    // into the module-metadata runtime variant, which is why we embed it ourselves;
+    // see embedJvmNativeLib below). So the classifier jar is pure duplication —
+    // ~4.6 MB of dead weight in every deployment and Maven Central upload. This
+    // flag (Gobley's own opt-out, default true) is the clean lever; removing the
+    // artifact post-hoc instead trips Gradle's component/metadata cross-check.
+    publishJvmArtifacts = false
+
     // Build native (Kotlin/Native, i.e. the iOS cinterop) targets in release.
     // Gobley's `nativeVariant` defaults to Debug, which embeds the ~375 MB debug
     // static lib into each iOS klib (~99 MB published). Release drops the static
