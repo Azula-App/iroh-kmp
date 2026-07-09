@@ -38,11 +38,12 @@ jobs:
       - name: Derive version from tag
         run: echo "VERSION_NAME=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
 
-      # For release #1, consider swapping to `publishToMavenCentral` instead,
-      # so the first upload can be reviewed manually in the Central Portal
-      # before it's released.
+      # Review mode for the initial release: `publishToMavenCentral` uploads a
+      # staging deployment to the Central Portal for manual review + publish,
+      # instead of releasing automatically. After the first successful release,
+      # switch to `publishAndReleaseToMavenCentral` for hands-off publishing.
       - name: Publish
-        run: ./gradlew publishAndReleaseToMavenCentral -PVERSION_NAME="$VERSION_NAME" --no-configuration-cache
+        run: ./gradlew publishToMavenCentral -PVERSION_NAME="$VERSION_NAME" --no-configuration-cache
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}

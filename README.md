@@ -18,7 +18,7 @@ the core iroh API so it's usable as a standalone SDK.
 
 ```kotlin
 // build.gradle.kts / KMP dependencies
-implementation("app.azula.iroh:iroh-kmp:0.2.0")
+implementation("app.azula.iroh:iroh-kmp:0.1.0")
 ```
 
 The bindings are generated at build time into the `app.azula.iroh` package. On
@@ -109,7 +109,7 @@ plugin → the Central Portal, driven by `.github/workflows/publish.yml` on a `v
 tag. To cut a release:
 
 1. Bump `VERSION_NAME` in `gradle.properties` **and** `version` in `Cargo.toml`.
-2. Commit, then push a matching tag: `git tag v0.2.0 && git push origin v0.2.0`.
+2. Commit, then push a matching tag: `git tag v0.1.0 && git push origin v0.1.0`.
 3. The workflow (on `macos-latest`, so it can build every KMP target in one
    publication set) signs and uploads all artifacts.
 
