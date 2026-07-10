@@ -38,10 +38,10 @@ jobs:
       - name: Derive version from tag
         run: echo "VERSION_NAME=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
 
-      # Review mode for the initial release: `publishToMavenCentral` uploads a
-      # staging deployment to the Central Portal for manual review + publish,
-      # instead of releasing automatically. After the first successful release,
-      # switch to `publishAndReleaseToMavenCentral` for hands-off publishing.
+      # `publishAndReleaseToMavenCentral` uploads the deployment AND releases it
+      # automatically (no manual Portal step). The initial 0.1.0 release was cut in
+      # review mode with `publishToMavenCentral`; now that the setup is proven,
+      # publishing is hands-off on every `v*` tag.
       #
       # The signing key is stored base64-encoded (secret SIGNING_IN_MEMORY_KEY_BASE64)
       # and decoded here. An ASCII-armored key stored raw carries newlines that get
@@ -58,4 +58,4 @@ jobs:
         run: |
           ORG_GRADLE_PROJECT_signingInMemoryKey="$(printf '%s' "$SIGNING_IN_MEMORY_KEY_BASE64" | base64 --decode)"
           export ORG_GRADLE_PROJECT_signingInMemoryKey
-          ./gradlew publishToMavenCentral -PVERSION_NAME="$VERSION_NAME" --no-configuration-cache
+          ./gradlew publishAndReleaseToMavenCentral -PVERSION_NAME="$VERSION_NAME" --no-configuration-cache
