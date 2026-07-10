@@ -42,10 +42,20 @@ jobs:
       # staging deployment to the Central Portal for manual review + publish,
       # instead of releasing automatically. After the first successful release,
       # switch to `publishAndReleaseToMavenCentral` for hands-off publishing.
+      #
+      # The signing key is stored base64-encoded (secret SIGNING_IN_MEMORY_KEY_BASE64)
+      # and decoded here. An ASCII-armored key stored raw carries newlines that get
+      # mangled through the GitHub secret -> env transport, which makes BouncyCastle
+      # fail with "Could not read PGP secret key" (it signs fine locally where the
+      # env var keeps real newlines). Base64 has no newlines to lose, so it round-
+      # trips intact; we decode it back to the armored form before Gradle reads it.
       - name: Publish
-        run: ./gradlew publishToMavenCentral -PVERSION_NAME="$VERSION_NAME" --no-configuration-cache
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_IN_MEMORY_KEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_IN_MEMORY_KEY_PASSWORD }}
+          SIGNING_IN_MEMORY_KEY_BASE64: ${{ secrets.SIGNING_IN_MEMORY_KEY_BASE64 }}
+        run: |
+          ORG_GRADLE_PROJECT_signingInMemoryKey="$(printf '%s' "$SIGNING_IN_MEMORY_KEY_BASE64" | base64 --decode)"
+          export ORG_GRADLE_PROJECT_signingInMemoryKey
+          ./gradlew publishToMavenCentral -PVERSION_NAME="$VERSION_NAME" --no-configuration-cache
