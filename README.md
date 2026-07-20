@@ -117,7 +117,7 @@ tag. To cut a release:
 verify the `app.azula` namespace on the Central Portal, and add repo secrets
 `MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`, `SIGNING_IN_MEMORY_KEY`,
 `SIGNING_IN_MEMORY_KEY_PASSWORD` (mapped in CI to the `ORG_GRADLE_PROJECT_*`
-properties vanniktech reads). See `azula-docs/docs/iroh-kmp.md` for the full
+properties vanniktech reads). See `azula-docs/openspec/specs/iroh-kmp/design.md` for the full
 runbook. For the very first release, swap `publishAndReleaseToMavenCentral` for
 `publishToMavenCentral` to review the staged deployment in the Portal before
 releasing.
