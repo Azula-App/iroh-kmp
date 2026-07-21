@@ -183,6 +183,13 @@ android {
     defaultConfig {
         minSdk = 26
         ndk.abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86_64"))
+        // Ships inside the AAR and is applied to every consumer's R8 run. JNA
+        // resolves fields and symbols by their literal names from native code,
+        // which R8 cannot see and renames by default — breaking the entire FFI
+        // layer in release builds only. Consumers can't fix this themselves
+        // (Amper exposes no proguard/R8 config), so the rules ride along here.
+        // See consumer-rules.pro for the full rationale.
+        consumerProguardFiles("consumer-rules.pro")
     }
 
     // r28+ for 16 KB page alignment (Android 15+).
