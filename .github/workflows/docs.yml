@@ -48,9 +48,13 @@ jobs:
         with:
           path: build/dokka/html
 
-  # GitHub Pages on a private repo requires GitHub Enterprise, so this job is
-  # gated to only run once the repo goes public. Until then, the `dokka-html`
-  # artifact uploaded above is the interim way to fetch the generated docs.
+  # Two things have to be true for this to work. GitHub Pages on a private repo
+  # requires GitHub Enterprise, hence the guard below — it kept this job skipped
+  # for every run before the repo went public. And Pages has to be enabled on the
+  # repo with "GitHub Actions" as the source, under Settings -> Pages; without
+  # that, actions/deploy-pages fails with a 404 from the deployments API.
+  # Either way, the `dokka-html` artifact uploaded above is a standalone way to
+  # fetch the generated docs.
   deploy:
     needs: build
     if: ${{ !github.event.repository.private }}
