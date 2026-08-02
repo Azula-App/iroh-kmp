@@ -281,6 +281,15 @@ dokka {
             localDirectory.set(rootDir)
         }
 
+        // Our entire public API — IrohEndpoint, IrohStream, NodeAddr, the Ed25519
+        // functions — is UniFFI output under build/generated/uniffi, and Dokka
+        // suppresses anything inside the build directory by default. That default
+        // silently emptied the published site: androidMain documented only the one
+        // hand-written file (IrohAndroid.kt) while the generated file sitting in the
+        // very same source set was dropped, so the docs looked Android-only when
+        // really they were "checked-in Kotlin only".
+        suppressGeneratedFiles.set(false)
+
         // Gobley generates a single shared `nativeMain` binding dir for all three
         // iOS targets, so Dokka's pre-generation validity check rejects the source
         // root as shared across source sets (Kotlin/dokka#3701). The generated
@@ -292,3 +301,17 @@ dokka {
         }
     }
 }
+
+// Gobley registers the generated UniFFI bindings as Kotlin source roots, but as
+// plain `layout.buildDirectory.dir(...)` providers that name no producing task,
+// and it only wires `buildUniffiBindings` into Kotlin compile, Jar and cinterop
+// tasks (UniFfiPlugin: `tasks.withType<KotlinCompilationTask<*>>` and friends).
+// Dokka is none of those, so nothing makes the bindings exist before it reads
+// them. A bare `./gradlew dokkaGenerate` on a clean checkout — exactly what the
+// docs workflow runs — then finds `build/generated/uniffi` empty and silently
+// documents only the one checked-in Kotlin file, IrohAndroid: the entire
+// generated `app.azula.iroh` surface (IrohEndpoint, IrohStream, NodeAddr, the
+// Ed25519 functions) was missing from the published site. It fails open rather
+// than loudly, so wire the dependency explicitly.
+tasks.matching { it.name.startsWith("dokkaGenerate") }
+    .configureEach { dependsOn("buildUniffiBindings") }
