@@ -371,6 +371,60 @@ mod tests {
         via_bind_with.shutdown().await;
     }
 
+    /// Binds with `address_lookup` on and the given relay mode, returning how many address
+    /// lookup services the endpoint ended up with.
+    async fn lookup_service_count(relay_mode: Option<RelayModeOption>) -> usize {
+        let ep = IrohEndpoint::bind_with(EndpointOptions {
+            alpns: vec!["test/lookup".into()],
+            secret_key: None,
+            relay_mode,
+            address_lookup: true,
+            bind_addr: None,
+            external_addrs: None,
+            warm_up_online: false,
+        })
+        .await
+        .expect("bind_with");
+        let n = ep.inner.address_lookup().expect("address_lookup").len();
+        ep.shutdown().await;
+        n
+    }
+
+    /// Turning relays off or pointing them elsewhere must not quietly cost us an address
+    /// lookup service. `builder_from_options` gets these by subtracting from `presets::N0`
+    /// rather than re-listing its contents, because the re-listed version drifted: it kept
+    /// publishing via pkarr while resolving over DNS alone once iroh 1.0.3 added
+    /// `PkarrResolver` to the preset. Asserting against the default path pins that, and
+    /// keeps pinning it as n0 adds services.
+    #[tokio::test(flavor = "current_thread")]
+    async fn address_lookup_survives_non_default_relay_modes() {
+        let default_count = lookup_service_count(None).await;
+        assert!(default_count > 0, "the n0 preset should install address lookup services");
+
+        assert_eq!(
+            lookup_service_count(Some(RelayModeOption::Disabled)).await,
+            default_count,
+            "disabling relays dropped an address lookup service",
+        );
+        assert_eq!(
+            lookup_service_count(Some(RelayModeOption::Custom {
+                urls: vec!["https://example.invalid".into()],
+            }))
+            .await,
+            default_count,
+            "a custom relay dropped an address lookup service",
+        );
+    }
+
+    /// The other half of the contract: `address_lookup: false` clears every service, so an
+    /// offline endpoint really is offline rather than quietly publishing to n0.
+    #[tokio::test(flavor = "current_thread")]
+    async fn address_lookup_false_clears_every_service() {
+        let ep = bind_offline("test/no-lookup").await;
+        assert_eq!(ep.inner.address_lookup().expect("address_lookup").len(), 0);
+        ep.shutdown().await;
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn connect_addr_bi_uni_and_datagram_roundtrip() {
         let alpn = "test/conn";

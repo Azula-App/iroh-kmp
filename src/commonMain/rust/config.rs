@@ -1,6 +1,5 @@
-use iroh::address_lookup::{DnsAddressLookup, PkarrPublisher};
 use iroh::endpoint::presets::{self, Preset as _};
-use iroh::endpoint::{default_relay_mode, Builder};
+use iroh::endpoint::Builder;
 use iroh::{RelayMode, RelayUrl, SecretKey};
 
 use crate::error::IrohError;
@@ -31,7 +30,10 @@ pub struct EndpointOptions {
     /// directly.
     #[uniffi(default = None)]
     pub relay_mode: Option<RelayModeOption>,
-    /// Whether to publish/resolve addresses via n0's DNS address lookup service.
+    /// Whether to publish and resolve addresses via n0's address lookup services — whichever
+    /// set `presets::N0` currently installs (as of iroh 1.0.3: pkarr publish, plus pkarr-over-
+    /// HTTPS and DNS resolution). `false` removes all of them, leaving an endpoint that can
+    /// only reach peers whose direct addresses or relay URL the caller supplies.
     #[uniffi(default = true)]
     pub address_lookup: bool,
     /// Explicit local socket address to bind, e.g. `"0.0.0.0:11204"`.
@@ -59,33 +61,36 @@ pub(crate) fn builder_from_options(options: EndpointOptions) -> Result<Builder, 
     } = options;
     let relay_mode = relay_mode.unwrap_or_default();
 
-    // The common case mirrors `presets::N0.apply(Builder::empty())` exactly, so `bind`'s
-    // delegation to `bind_with` produces a byte-for-byte identical endpoint. Anything else
-    // is composed manually from `presets::Minimal` (just the crypto provider).
-    let mut builder = if matches!(relay_mode, RelayModeOption::Default) && address_lookup {
-        presets::N0.apply(Builder::empty())
-    } else {
-        let mut b = presets::Minimal.apply(Builder::empty());
-        b = match relay_mode {
-            RelayModeOption::Default => b.relay_mode(default_relay_mode()),
-            RelayModeOption::Disabled => b.relay_mode(RelayMode::Disabled),
-            RelayModeOption::Custom { urls } => {
-                let relay_urls = urls
-                    .iter()
-                    .map(|u| u.parse::<RelayUrl>().map_err(IrohError::msg))
-                    .collect::<Result<Vec<_>, _>>()?;
-                b.relay_mode(RelayMode::custom(relay_urls))
-            }
-        };
-        if address_lookup {
-            b = b
-                .address_lookup(PkarrPublisher::n0_dns())
-                .address_lookup(DnsAddressLookup::n0_dns());
-        } else {
-            b = b.clear_address_lookup();
+    // Every configuration starts from `presets::N0` and subtracts, rather than composing the
+    // non-default cases up from `presets::Minimal`. Hand-listing the preset's contents is how
+    // this wrapper silently fell behind before: iroh 1.0.3 added `PkarrResolver::n0_dns()` to
+    // N0 (1.0.0 had it only under `cfg(wasm_browser)`), and the hand-built branch kept
+    // publishing via pkarr while resolving over DNS alone. Starting from the preset means the
+    // next service n0 adds arrives here for free.
+    //
+    // The subtractions are exact, not approximate: `relay_mode` *replaces* the preset's relay
+    // transport (and `Disabled` removes it outright), and `clear_address_lookup` drops every
+    // lookup the preset registered — leaving just the crypto provider, which is all
+    // `presets::Minimal` ever contributed. So each case below is byte-for-byte what the old
+    // code produced, except for the resolver it was missing.
+    let mut builder = presets::N0.apply(Builder::empty());
+
+    builder = match relay_mode {
+        // Already applied by the preset.
+        RelayModeOption::Default => builder,
+        RelayModeOption::Disabled => builder.relay_mode(RelayMode::Disabled),
+        RelayModeOption::Custom { urls } => {
+            let relay_urls = urls
+                .iter()
+                .map(|u| u.parse::<RelayUrl>().map_err(IrohError::msg))
+                .collect::<Result<Vec<_>, _>>()?;
+            builder.relay_mode(RelayMode::custom(relay_urls))
         }
-        b
     };
+
+    if !address_lookup {
+        builder = builder.clear_address_lookup();
+    }
 
     if let Some(bytes) = secret_key {
         let key: [u8; 32] = bytes
