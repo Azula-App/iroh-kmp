@@ -281,7 +281,7 @@ dokka {
             localDirectory.set(rootDir)
         }
 
-        // Our entire public API — IrohEndpoint, IrohStream, NodeAddr, the Ed25519
+        // Our entire public API — IrohEndpoint, IrohStream, EndpointAddr, the Ed25519
         // functions — is UniFFI output under build/generated/uniffi, and Dokka
         // suppresses anything inside the build directory by default. That default
         // silently emptied the published site: androidMain documented only the one
@@ -310,7 +310,7 @@ dokka {
 // them. A bare `./gradlew dokkaGenerate` on a clean checkout — exactly what the
 // docs workflow runs — then finds `build/generated/uniffi` empty and silently
 // documents only the one checked-in Kotlin file, IrohAndroid: the entire
-// generated `app.azula.iroh` surface (IrohEndpoint, IrohStream, NodeAddr, the
+// generated `app.azula.iroh` surface (IrohEndpoint, IrohStream, EndpointAddr, the
 // Ed25519 functions) was missing from the published site. It fails open rather
 // than loudly, so wire the dependency explicitly.
 tasks.matching { it.name.startsWith("dokkaGenerate") }

@@ -10,7 +10,7 @@ use iroh_tickets::Ticket as _;
 use crate::config::EndpointOptions;
 use crate::connection::{IrohConnection, PathKind};
 use crate::error::IrohError;
-use crate::node_addr::NodeAddr;
+use crate::endpoint_addr::EndpointAddr;
 use crate::remote_info::{RemoteAddrInfo, RemoteInfo};
 use crate::stream::IrohStream;
 
@@ -77,8 +77,8 @@ impl IrohEndpoint {
         Ok(Arc::new(IrohEndpoint { inner }))
     }
 
-    /// Hex node id of this endpoint (stable across binds for a given secret key).
-    pub fn node_id(&self) -> String {
+    /// Hex endpoint id of this endpoint (stable across binds for a given secret key).
+    pub fn id(&self) -> String {
         self.inner.id().to_string()
     }
 
@@ -103,7 +103,7 @@ impl IrohEndpoint {
     }
 
     /// Dial a peer by `ticket` on `alpn`, returning the established connection without
-    /// opening a stream. See [`Self::connect_addr`] and [`Self::connect_by_node_id`] for
+    /// opening a stream. See [`Self::connect_addr`] and [`Self::connect_by_id`] for
     /// dialing without a ticket, and [`Self::connect`] for the ticket+bi-stream convenience.
     #[uniffi::method(async_runtime = "tokio")]
     pub async fn connect_conn(&self, ticket: String, alpn: String) -> Result<Arc<IrohConnection>, IrohError> {
@@ -113,19 +113,19 @@ impl IrohEndpoint {
         Ok(Arc::new(IrohConnection::new(conn)))
     }
 
-    /// Dial a peer by its structured [`NodeAddr`] on `alpn`.
+    /// Dial a peer by its structured [`EndpointAddr`] on `alpn`.
     #[uniffi::method(async_runtime = "tokio")]
-    pub async fn connect_addr(&self, addr: NodeAddr, alpn: String) -> Result<Arc<IrohConnection>, IrohError> {
+    pub async fn connect_addr(&self, addr: EndpointAddr, alpn: String) -> Result<Arc<IrohConnection>, IrohError> {
         let addr: iroh::EndpointAddr = addr.try_into()?;
         let conn = self.inner.connect(addr, alpn.as_bytes()).await.map_err(IrohError::msg)?;
         Ok(Arc::new(IrohConnection::new(conn)))
     }
 
-    /// Dial a peer by hex node id alone on `alpn`, relying on the endpoint's address
+    /// Dial a peer by hex endpoint id alone on `alpn`, relying on the endpoint's address
     /// lookup service to resolve reachable addresses.
     #[uniffi::method(async_runtime = "tokio")]
-    pub async fn connect_by_node_id(&self, node_id_hex: String, alpn: String) -> Result<Arc<IrohConnection>, IrohError> {
-        let id = PublicKey::from_str(&node_id_hex).map_err(IrohError::msg)?;
+    pub async fn connect_by_id(&self, endpoint_id_hex: String, alpn: String) -> Result<Arc<IrohConnection>, IrohError> {
+        let id = PublicKey::from_str(&endpoint_id_hex).map_err(IrohError::msg)?;
         let conn = self.inner.connect(id, alpn.as_bytes()).await.map_err(IrohError::msg)?;
         Ok(Arc::new(IrohConnection::new(conn)))
     }
@@ -142,7 +142,7 @@ impl IrohEndpoint {
             Some(conn) => conn,
             None => return Ok(None),
         };
-        let remote_id = conn.remote_node_id();
+        let remote_id = conn.remote_id();
         let alpn = conn.alpn();
         let stream = conn.accept_bi().await?;
         Ok(Some(IncomingConn { remote_id, alpn, stream }))
@@ -175,15 +175,15 @@ impl IrohEndpoint {
     }
 
     /// A snapshot of this endpoint's current addressing info (relay + direct addresses).
-    /// May be incomplete until [`Self::wait_online`] resolves; see [`Self::node_addr_updated`]
+    /// May be incomplete until [`Self::wait_online`] resolves; see [`Self::addr_updated`]
     /// to wait for a change.
-    pub fn node_addr(&self) -> NodeAddr {
+    pub fn addr(&self) -> EndpointAddr {
         self.inner.addr().into()
     }
 
     /// Waits for this endpoint's addressing info to change, then returns the new snapshot.
     #[uniffi::method(async_runtime = "tokio")]
-    pub async fn node_addr_updated(&self) -> NodeAddr {
+    pub async fn addr_updated(&self) -> EndpointAddr {
         let mut watcher = self.inner.watch_addr();
         match watcher.updated().await {
             Ok(addr) => addr.into(),
@@ -234,15 +234,15 @@ impl IrohEndpoint {
 
     // TODO: expose endpoint metrics (metrics cargo feature)
 
-    /// Addressing info this endpoint currently knows about `node_id_hex`, or `None` if
+    /// Addressing info this endpoint currently knows about `endpoint_id_hex`, or `None` if
     /// it's unknown or the endpoint is closed. A snapshot in time, not a watcher.
     #[uniffi::method(async_runtime = "tokio")]
-    pub async fn remote_info(&self, node_id_hex: String) -> Result<Option<RemoteInfo>, IrohError> {
-        let id = PublicKey::from_str(&node_id_hex).map_err(IrohError::msg)?;
+    pub async fn remote_info(&self, endpoint_id_hex: String) -> Result<Option<RemoteInfo>, IrohError> {
+        let id = PublicKey::from_str(&endpoint_id_hex).map_err(IrohError::msg)?;
         let Some(info) = self.inner.remote_info(id).await else {
             return Ok(None);
         };
-        let node_id = info.id().to_string();
+        let id = info.id().to_string();
         let addrs = info
             .into_addrs()
             .map(|a| {
@@ -260,26 +260,26 @@ impl IrohEndpoint {
                 RemoteAddrInfo { addr, kind, usage }
             })
             .collect();
-        Ok(Some(RemoteInfo { node_id, addrs }))
+        Ok(Some(RemoteInfo { id, addrs }))
     }
 }
 
-/// Decode the peer's hex node id from a shareable ticket, without dialing. Lets
+/// Decode the peer's hex endpoint id from a shareable ticket, without dialing. Lets
 /// the app key/name a conversation after the peer it's connecting out to (inbound
 /// connections already expose `remote_id`).
 #[uniffi::export]
-pub fn node_id_from_ticket(ticket: String) -> Result<String, IrohError> {
+pub fn endpoint_id_from_ticket(ticket: String) -> Result<String, IrohError> {
     let t = EndpointTicket::from_str(&ticket).map_err(IrohError::msg)?;
     Ok(t.endpoint_addr().id.to_string())
 }
 
-/// Verify an Ed25519 `signature` over `data` against the node id `node_id_hex`.
+/// Verify an Ed25519 `signature` over `data` against the endpoint id `endpoint_id_hex`.
 /// Used to check an invitations payload's signature (see azula-docs
-/// `invitations.md`) against the node id embedded in its ticket. Never throws:
-/// a malformed node id or signature is just an invalid signature (`false`).
+/// `invitations.md`) against the endpoint id embedded in its ticket. Never throws:
+/// a malformed endpoint id or signature is just an invalid signature (`false`).
 #[uniffi::export]
-pub fn verify_signature(node_id_hex: String, data: Vec<u8>, signature: Vec<u8>) -> bool {
-    let Ok(key) = PublicKey::from_str(&node_id_hex) else {
+pub fn verify_signature(endpoint_id_hex: String, data: Vec<u8>, signature: Vec<u8>) -> bool {
+    let Ok(key) = PublicKey::from_str(&endpoint_id_hex) else {
         return false;
     };
     let Ok(sig) = Signature::try_from(signature.as_slice()) else {
@@ -328,17 +328,17 @@ mod tests {
         .expect("bind_with")
     }
 
-    /// This endpoint's loopback [`NodeAddr`]: its bound port reachable via `127.0.0.1`,
+    /// This endpoint's loopback [`EndpointAddr`]: its bound port reachable via `127.0.0.1`,
     /// sidestepping relay/address-lookup/net-report entirely for a fast, offline test.
-    fn loopback_addr(ep: &IrohEndpoint) -> NodeAddr {
+    fn loopback_addr(ep: &IrohEndpoint) -> EndpointAddr {
         let port = ep
             .bound_sockets()
             .into_iter()
             .find_map(|s| s.parse::<std::net::SocketAddr>().ok())
             .expect("at least one bound socket")
             .port();
-        NodeAddr {
-            node_id: ep.node_id(),
+        EndpointAddr {
+            id: ep.id(),
             relay_url: None,
             direct_addresses: vec![format!("127.0.0.1:{port}")],
         }
@@ -362,7 +362,7 @@ mod tests {
         .await
         .expect("bind_with");
 
-        assert_eq!(via_bind.node_id(), via_bind_with.node_id());
+        assert_eq!(via_bind.id(), via_bind_with.id());
         assert_eq!(via_bind.secret_key_bytes(), via_bind_with.secret_key_bytes());
         assert!(!via_bind.is_closed());
         assert!(!via_bind_with.is_closed());
@@ -481,16 +481,16 @@ mod tests {
         let endpoint = IrohEndpoint::bind(vec!["test/sign".into()], Some(secret_key))
             .await
             .expect("bind");
-        let node_id = endpoint.node_id();
+        let id = endpoint.id();
         let data = b"hello invitations".to_vec();
 
         let sig = endpoint.sign(data.clone());
         assert_eq!(sig.len(), 64);
-        assert!(verify_signature(node_id.clone(), data.clone(), sig.clone()));
+        assert!(verify_signature(id.clone(), data.clone(), sig.clone()));
 
         let mut bad_sig = sig.clone();
         bad_sig[0] ^= 0x01;
-        assert!(!verify_signature(node_id, data, bad_sig));
+        assert!(!verify_signature(id, data, bad_sig));
 
         endpoint.shutdown().await;
     }
@@ -525,7 +525,7 @@ mod tests {
         let sig = secret.sign(b"");
         assert_eq!(sig.to_bytes().to_vec(), expected_sig);
 
-        let node_id_hex = secret.public().to_string();
-        assert!(verify_signature(node_id_hex, Vec::new(), expected_sig));
+        let endpoint_id_hex = secret.public().to_string();
+        assert!(verify_signature(endpoint_id_hex, Vec::new(), expected_sig));
     }
 }

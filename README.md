@@ -9,7 +9,7 @@ bindings with [Gobley](https://gobley.dev). Targets: `jvm`, `android`, and Apple
 ## Why this exists
 
 The published `computer.iroh:iroh` Maven artifact is UniFFI-**over-JNA**, and its
-async calls never complete on Android (`Endpoint.bind` hangs, `nodeId` stays null).
+async calls never complete on Android (`Endpoint.bind` hangs, `id` stays null).
 Gobley generates **JNI**-backed bindings, whose async (tokio) calls do complete on
 Android. iroh-kmp started as a minimal transport for the azula app and now exposes
 the core iroh API so it's usable as a standalone SDK.
@@ -39,14 +39,14 @@ convenience layer over the richer `IrohConnection` API.
 - `IrohEndpoint.bind_with(EndpointOptions)` — full control: `relayMode`
   (`Default` / `Disabled` / `Custom(urls)`), `addressLookup` on/off, `bindAddr`,
   `externalAddrs`, `warmUpOnline`.
-- `nodeId()`, `secretKeyBytes()`, `sign(data)`, `isClosed()`, `shutdown()`
+- `id()`, `secretKeyBytes()`, `sign(data)`, `isClosed()`, `shutdown()`
 - `setAlpns(alpns)`, `networkChange()`
 
 ### Endpoint — dial
 - `connect(ticket, alpn)` → `IrohStream` (ticket + one bi-stream; the app's path)
 - `connectConn(ticket, alpn)` → `IrohConnection`
-- `connectAddr(NodeAddr, alpn)` → `IrohConnection`
-- `connectByNodeId(nodeIdHex, alpn)` → `IrohConnection` (resolves via address lookup)
+- `connectAddr(EndpointAddr, alpn)` → `IrohConnection`
+- `connectById(endpointIdHex, alpn)` → `IrohConnection` (resolves via address lookup)
 
 ### Endpoint — accept
 - `acceptNext()` → `IncomingConn?` (ticket-era convenience: connection + accepted bi-stream)
@@ -75,14 +75,14 @@ convenience layer over the richer `IrohConnection` API.
 
 ### Addresses, status & remote info
 - `myTicket()` — online + a shareable `EndpointTicket` string ("code")
-- `nodeAddr()` / `nodeAddrUpdated()` — current addressing snapshot / await next change
+- `addr()` / `addrUpdated()` — current addressing snapshot / await next change
 - `directAddresses()`, `homeRelay()`, `boundSockets()`, `waitOnline()`
-- `remoteInfo(nodeIdHex)` → `RemoteInfo?` (per-address `RemoteAddrInfo`)
-- free fns: `nodeIdFromTicket`, `verifySignature`, `ticketBytes`, `ticketFromBytes`,
-  `nodeAddrFromTicket`, `ticketFromNodeAddr`
+- `remoteInfo(endpointIdHex)` → `RemoteInfo?` (per-address `RemoteAddrInfo`)
+- free fns: `endpointIdFromTicket`, `verifySignature`, `ticketBytes`, `ticketFromBytes`,
+  `endpointAddrFromTicket`, `ticketFromEndpointAddr`
 
 Watchers are surfaced as snapshot + `…Updated()` accessors (UniFFI can't ship a
-`Watcher`/stream across the FFI); loop `nodeAddrUpdated()` into a Kotlin `Flow` the
+`Watcher`/stream across the FFI); loop `addrUpdated()` into a Kotlin `Flow` the
 same way you loop `acceptNext()`.
 
 > Metrics are not yet exposed (see the `// TODO` in `endpoint.rs`).

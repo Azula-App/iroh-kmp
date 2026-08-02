@@ -12,6 +12,6 @@ pub struct RemoteAddrInfo {
 /// Returned by [`crate::IrohEndpoint::remote_info`].
 #[derive(uniffi::Record)]
 pub struct RemoteInfo {
-    pub node_id: String,
+    pub id: String,
     pub addrs: Vec<RemoteAddrInfo>,
 }

@@ -6,7 +6,7 @@ use crate::error::IrohError;
 use crate::stream::{IrohRecvStream, IrohSendStream, IrohStream};
 
 /// An established QUIC connection to a peer, with no stream opened yet. Returned by
-/// [`crate::IrohEndpoint::connect_conn`] / `connect_addr` / `connect_by_node_id` /
+/// [`crate::IrohEndpoint::connect_conn`] / `connect_addr` / `connect_by_id` /
 /// `accept_conn`; [`crate::IrohEndpoint::connect`] and `accept_next` build on top of this to
 /// also open/accept the app's usual bidirectional stream.
 #[derive(uniffi::Object)]
@@ -122,8 +122,8 @@ impl IrohConnection {
         self.inner.close_reason().map(|e| e.to_string())
     }
 
-    /// Hex node id of the peer.
-    pub fn remote_node_id(&self) -> String {
+    /// Hex endpoint id of the peer.
+    pub fn remote_id(&self) -> String {
         self.inner.remote_id().to_string()
     }
 

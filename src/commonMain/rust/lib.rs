@@ -3,7 +3,7 @@
 //! It exposes the core `iroh` surface: bind and configure an [`IrohEndpoint`]
 //! ([`bind`](endpoint::IrohEndpoint::bind) /
 //! [`bind_with`](endpoint::IrohEndpoint::bind_with) + [`EndpointOptions`]), dial
-//! peers by ticket, [`NodeAddr`], or node id, accept inbound connections, and work
+//! peers by ticket, [`EndpointAddr`], or endpoint id, accept inbound connections, and work
 //! with a first-class [`IrohConnection`] (multiple bi/uni streams, datagrams,
 //! close codes, paths/RTT/conn-type), plus address/relay watchers and remote-peer
 //! info. The narrow ticket + bidirectional-stream convenience path the azula app's
@@ -21,7 +21,7 @@ mod connection;
 mod crypto;
 mod endpoint;
 mod error;
-mod node_addr;
+mod endpoint_addr;
 mod remote_info;
 mod stream;
 
@@ -33,7 +33,7 @@ pub use connection::{ConnPath, IrohConnection, PathKind};
 pub use crypto::{ed25519_public_from_secret, ed25519_sign, ed25519_verify, generate_ed25519_keypair, Ed25519Keypair};
 pub use endpoint::{IncomingConn, IrohEndpoint};
 pub use error::IrohError;
-pub use node_addr::{node_addr_from_ticket, ticket_from_node_addr, NodeAddr};
+pub use endpoint_addr::{endpoint_addr_from_ticket, ticket_from_endpoint_addr, EndpointAddr};
 pub use remote_info::{RemoteAddrInfo, RemoteInfo};
 pub use stream::{IrohRecvStream, IrohSendStream, IrohStream};
 
