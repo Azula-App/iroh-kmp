@@ -1,18 +1,19 @@
 name: Docs
 
+# No `release` trigger here on purpose. Tags are always cut from main, so the
+# push that produced the tagged commit has already built and deployed exactly
+# these docs. Worse, a release-triggered run builds the tag ref, and the
+# github-pages environment only permits deployments from `main` — so it burned
+# ~9 minutes of macOS runner and then failed at deploy, every time.
 on:
   push:
     branches: [main]
-  release:
-    types: [published]
   workflow_dispatch:
 
-# Every trigger above ends in a Pages deploy, and a `release` run builds that
-# release's tag rather than main. Without a shared group, two runs can deploy
-# out of order and leave the site showing an older version's API — which is
-# exactly what nearly happened when three back-dated releases were published at
-# once. One pending run per group means the newest queued build is the one that
-# lands; in-progress deploys are left alone to finish rather than half-applied.
+# Two pushes landing on main minutes apart otherwise race, and the deploy that
+# finishes last wins regardless of which commit is newer. One pending run per
+# group means the newest queued build is the one that lands; in-progress
+# deploys are left to finish rather than being half-applied.
 concurrency:
   group: pages
   cancel-in-progress: false
