@@ -59,3 +59,46 @@ jobs:
           ORG_GRADLE_PROJECT_signingInMemoryKey="$(printf '%s' "$SIGNING_IN_MEMORY_KEY_BASE64" | base64 --decode)"
           export ORG_GRADLE_PROJECT_signingInMemoryKey
           ./gradlew publishAndReleaseToMavenCentral -PVERSION_NAME="$VERSION_NAME" --no-configuration-cache
+
+  # The Maven Central upload above is the real release; this job only mirrors it
+  # onto the GitHub Releases page, which otherwise stays empty — v0.1.0 was the
+  # only entry there, cut by hand during the initial review-mode release, so
+  # 0.1.1/0.1.2/0.2.0 shipped invisibly. Kept as its own job so the long
+  # macOS build never holds `contents: write`.
+  release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Full history so the annotated tag object is present and `git
+          # describe` can find the preceding tag for the compare link.
+          fetch-depth: 0
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PREV="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          # Prose from the annotated tag when it has any; a subject-only tag
+          # (v0.1.2, v0.2.0) would otherwise yield an empty release, so fall
+          # back to the commit subjects since the previous tag.
+          BODY="$(git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME")"
+          if [ -z "$(printf '%s' "$BODY" | tr -d '[:space:]')" ] && [ -n "$PREV" ]; then
+            BODY="$(git log --format='- %s' "$PREV..$GITHUB_REF_NAME")"
+          fi
+          {
+            printf '%s\n' "$BODY"
+            printf '\n```kotlin\nimplementation("app.azula.iroh:iroh-kmp:%s")\n```\n' "$VERSION"
+            if [ -n "$PREV" ]; then
+              printf '\n**Full Changelog**: https://github.com/%s/compare/%s...%s\n' \
+                "$GITHUB_REPOSITORY" "$PREV" "$GITHUB_REF_NAME"
+            fi
+          } > "$RUNNER_TEMP/notes.md"
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --title "$(git tag -l --format='%(contents:subject)' "$GITHUB_REF_NAME")" \
+            --notes-file "$RUNNER_TEMP/notes.md"
