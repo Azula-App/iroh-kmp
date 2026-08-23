@@ -7,6 +7,16 @@ on:
     types: [published]
   workflow_dispatch:
 
+# Every trigger above ends in a Pages deploy, and a `release` run builds that
+# release's tag rather than main. Without a shared group, two runs can deploy
+# out of order and leave the site showing an older version's API — which is
+# exactly what nearly happened when three back-dated releases were published at
+# once. One pending run per group means the newest queued build is the one that
+# lands; in-progress deploys are left alone to finish rather than half-applied.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
