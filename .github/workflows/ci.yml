@@ -18,10 +18,13 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      # JDK and Rust both come from mise.toml — do not restate versions
-      # here. mise's Rust ships clippy, so the old `components: clippy`
-      # input has no replacement step.
+      # JDK and Rust both come from mise.toml — do not restate versions here.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+
+      # mise installs toolchains, not rustup components — the same split as
+      # targets. This replaces rust-toolchain's `components: clippy` input.
+      - name: Add clippy
+        run: rustup component add clippy
 
       - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
 
