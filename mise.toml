@@ -1,0 +1,14 @@
+# Toolchain for iroh-kmp. Exact pins only — see azula-docs' openspec/specs/
+# toolchain/ and the Build / verify section of openspec/project.md.
+#
+# JDK 17 is required by AGP 8.7 and is DELIBERATELY different from
+# azula-app's JDK 21. Entering each repo selects the right one; this is why
+# neither needs JAVA_HOME set by hand.
+#
+# The Android SDK/NDK (r28+, via ANDROID_HOME) stays host-provided, and the
+# Rust Android/iOS targets are added with `rustup target add` — mise manages
+# toolchains, not targets.
+
+[tools]
+java = "temurin-17.0.20+8"
+rust = "1.98.0"
