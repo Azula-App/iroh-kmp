@@ -158,16 +158,20 @@ kotlin {
     jvmToolchain(17)
     jvm()
 
-    // iOS is only buildable on macOS; gate it so the project still configures on Linux/CI.
+    // Apple targets are only buildable on macOS; gate them so the project still configures on Linux/CI.
     if (GobleyHost.Platform.MacOS.isCurrent) {
         iosArm64()
         iosSimulatorArm64()
         iosX64()
+        macosArm64()
     }
 
     sourceSets {
         commonMain.dependencies {
             implementation(libs.kotlinx.coroutines.core)
+        }
+        commonTest.dependencies {
+            implementation(kotlin("test"))
         }
         jvmMain {
             // Carry the host dylib inside the main jvm jar (see embedJvmNativeLib).

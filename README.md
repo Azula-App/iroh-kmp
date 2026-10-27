@@ -4,7 +4,7 @@ A full-featured [iroh](https://iroh.computer) SDK for **Kotlin Multiplatform**,
 packaged as `app.azula.iroh`. It wraps the `iroh` 1.0 Rust crate in a small +
 [UniFFI](https://mozilla.github.io/uniffi-rs/) crate and generates JNI-backed KMP
 bindings with [Gobley](https://gobley.dev). Targets: `jvm`, `android`, and Apple
-(`iosArm64`, `iosSimulatorArm64`, `iosX64`).
+(`iosArm64`, `iosSimulatorArm64`, `iosX64`, `macosArm64`).
 
 ## Why this exists
 
@@ -89,7 +89,7 @@ same way you loop `acceptNext()`.
 
 ## Build & publish locally
 
-Requires the Android NDK (r28+), Rust with the Android/iOS targets, and JDK 17
+Requires the Android NDK (r28+), Rust with the Android/iOS/macOS targets, and JDK 17
 (AGP 8.7.x).
 
 ```bash
