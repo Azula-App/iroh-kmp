@@ -31,7 +31,7 @@ pub struct EndpointOptions {
     #[uniffi(default = None)]
     pub relay_mode: Option<RelayModeOption>,
     /// Whether to publish and resolve addresses via n0's address lookup services — whichever
-    /// set `presets::N0` currently installs (as of iroh 1.0.3: pkarr publish, plus pkarr-over-
+    /// set `presets::N0` currently installs (as of iroh 1.4.1: pkarr publish, plus pkarr-over-
     /// HTTPS and DNS resolution). `false` removes all of them, leaving an endpoint that can
     /// only reach peers whose direct addresses or relay URL the caller supplies.
     #[uniffi(default = true)]

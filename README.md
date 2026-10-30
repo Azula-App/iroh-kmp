@@ -1,7 +1,7 @@
 # iroh-kmp
 
 A full-featured [iroh](https://iroh.computer) SDK for **Kotlin Multiplatform**,
-packaged as `app.azula.iroh`. It wraps the `iroh` 1.0 Rust crate in a small +
+packaged as `app.azula.iroh`. It wraps the `iroh` 1.4 Rust crate in a small +
 [UniFFI](https://mozilla.github.io/uniffi-rs/) crate and generates JNI-backed KMP
 bindings with [Gobley](https://gobley.dev). Targets: `jvm`, `android`, and Apple
 (`iosArm64`, `iosSimulatorArm64`, `iosX64`, `macosArm64`).
@@ -131,7 +131,7 @@ automatically once the repo is public and Pages is enabled (Source: GitHub Actio
 
 ## Toolchain versions
 
-Kotlin 2.1.10 · AGP 8.7.3 · Gobley 0.3.7 · UniFFI 0.29 · Gradle 8.13 · iroh 1.0 ·
+Kotlin 2.1.10 · AGP 8.7.3 · Gobley 0.3.7 · UniFFI 0.29 · Gradle 8.13 · iroh 1.4 ·
 Dokka 2.2.0 · vanniktech maven-publish 0.35.0.
 
 ## License
