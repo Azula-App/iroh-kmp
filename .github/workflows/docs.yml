@@ -37,9 +37,9 @@ jobs:
           ndk-version: r28
           link-to-sdk: true
 
-      # mise installs toolchains, not rustup targets; same six targets.
-      - name: Add Android and iOS targets
-        run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
+      # mise installs toolchains, not rustup targets; same targets as publish.yml.
+      - name: Add Android, iOS and macOS targets
+        run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios aarch64-apple-darwin
 
       - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
 

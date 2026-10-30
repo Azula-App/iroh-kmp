@@ -294,13 +294,16 @@ dokka {
         // really they were "checked-in Kotlin only".
         suppressGeneratedFiles.set(false)
 
-        // Gobley generates a single shared `nativeMain` binding dir for all three
-        // iOS targets, so Dokka's pre-generation validity check rejects the source
-        // root as shared across source sets (Kotlin/dokka#3701). The generated
-        // `app.azula.iroh` API is identical across them, so document it once via
-        // iosArm64 and suppress the duplicates. `startsWith` covers the DGP source-set
-        // name whether or not it carries the `Main` suffix.
-        if (name.startsWith("iosSimulatorArm64") || name.startsWith("iosX64")) {
+        // Gobley generates a single shared `nativeMain` binding dir for every
+        // Kotlin/Native target (the three iOS ones and macosArm64), so Dokka's
+        // pre-generation validity check rejects the source root as shared across
+        // source sets (Kotlin/dokka#3701). The generated `app.azula.iroh` API is
+        // identical across them, so document it once via iosArm64 and suppress the
+        // duplicates. `startsWith` covers the DGP source-set name whether or not it
+        // carries the `Main` suffix.
+        if (name.startsWith("iosSimulatorArm64") || name.startsWith("iosX64") ||
+            name.startsWith("macosArm64")
+        ) {
             suppress.set(true)
         }
     }
