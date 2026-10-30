@@ -4,7 +4,9 @@ A full-featured [iroh](https://iroh.computer) SDK for **Kotlin Multiplatform**,
 packaged as `app.azula.iroh`. It wraps the `iroh` 1.4 Rust crate in a small +
 [UniFFI](https://mozilla.github.io/uniffi-rs/) crate and generates JNI-backed KMP
 bindings with [Gobley](https://gobley.dev). Targets: `jvm`, `android`, and Apple
-(`iosArm64`, `iosSimulatorArm64`, `iosX64`, `macosArm64`).
+(`iosArm64`, `iosSimulatorArm64`, `iosX64`, `macosArm64`). The `jvm` jar carries
+native libraries for macOS arm64, Linux x64/arm64 (glibc 2.34+) and Windows x64,
+so JVM desktop apps on each load it with no extra setup.
 
 ## Why this exists
 

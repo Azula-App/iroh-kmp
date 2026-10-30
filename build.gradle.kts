@@ -54,7 +54,7 @@ cargo {
     }
 }
 
-// --- Don't cross-compile Linux/Windows JVM variants we never publish --------
+// --- Don't cross-compile Linux/Windows JVM libs on this host ----------------
 // embedRustLibrary above only controls which target's output gets embedded in
 // the jvm jar — Gobley still wires cargoBuildLinux*/cargoBuildMinGW* into the
 // task graph for `publishToMavenLocal` (they'd back per-host "rust-runtime"
@@ -62,8 +62,9 @@ cargo {
 // aarch64-linux-gnu-gcc cross-linker; and even where a mingw-w64 toolchain
 // happens to be on PATH for unrelated reasons, this crate's huge dependency
 // tree hits mingw's PE export-table limit — "export ordinal too large").
-// Only the Apple + Android targets are actually published/consumed
-// (azula-app depends on app.azula.iroh:iroh-kmp for those), so just disable
+// The Linux/Windows libs the jvm jar does ship are built natively on their own
+// hosts by publish.yml and handed in via -PjvmPrebuiltNatives (see
+// embedJvmNativeLib), so just disable
 // the Linux/Windows cargo builds outside of their native host — the same
 // idea as the iOS `GobleyHost.Platform.MacOS.isCurrent` gate below — instead
 // of requiring
@@ -125,24 +126,49 @@ fun hostNativeLib(): HostNativeLib {
 }
 
 val jvmNativeResDir = layout.buildDirectory.dir("jvmNativeResources")
-val embedJvmNativeLib = tasks.register<Copy>("embedJvmNativeLib") {
+
+// Every desktop platform the published jvm jar carries a native lib for, as
+// `<jna-platform-dir>/<lib>`. This host only builds its own (the Linux/MinGW
+// cross-builds are disabled above), so a release supplies the rest through
+// -PjvmPrebuiltNatives=<dir>, laid out the same way: publish.yml's jvm-natives
+// job builds each one on a matching runner.
+val publishedJvmNatives = listOf(
+    "darwin-aarch64/libiroh_kmp.dylib",
+    "linux-x86-64/libiroh_kmp.so",
+    "linux-aarch64/libiroh_kmp.so",
+    "win32-x86-64/iroh_kmp.dll",
+)
+val jvmPrebuiltNatives = providers.gradleProperty("jvmPrebuiltNatives").map { file(it) }
+
+val embedJvmNativeLib = tasks.register<Sync>("embedJvmNativeLib") {
     val native = hostNativeLib()
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
-    from(layout.projectDirectory.dir("target/${native.rustTriple}/debug")) { include(native.libFileName) }
-    from(layout.projectDirectory.dir("target/${native.rustTriple}/release")) { include(native.libFileName) }
-    into(jvmNativeResDir.map { it.dir(native.jnaPlatformDir) })
+    into(jvmNativeResDir)
+    from(layout.projectDirectory.dir("target/${native.rustTriple}/debug")) {
+        include(native.libFileName)
+        into(native.jnaPlatformDir)
+    }
+    from(layout.projectDirectory.dir("target/${native.rustTriple}/release")) {
+        include(native.libFileName)
+        into(native.jnaPlatformDir)
+    }
+    if (jvmPrebuiltNatives.isPresent) from(jvmPrebuiltNatives)
     dependsOn(tasks.matching { it.name.startsWith("cargoBuild") })
 
-    // Fail loudly instead of silently shipping a jar with no native lib for this
-    // host (which would only surface later as an UnsatisfiedLinkError).
+    // Fail loudly instead of silently shipping a jar missing a native lib (which
+    // would only surface later as an UnsatisfiedLinkError on that platform): the
+    // host's always, and every published platform's once prebuilt libs are supplied.
+    val required = if (jvmPrebuiltNatives.isPresent) publishedJvmNatives
+        else listOf("${native.jnaPlatformDir}/${native.libFileName}")
     doLast {
-        val copied = jvmNativeResDir.get().dir(native.jnaPlatformDir).file(native.libFileName).asFile
-        check(copied.exists()) {
-            "embedJvmNativeLib: expected native library not found at ${copied.absolutePath} " +
-                "(host rust target ${native.rustTriple}). The jvm jar would silently ship without " +
-                "it, causing UnsatisfiedLinkError at runtime instead of failing the build now. " +
-                "Check that `cargo build` produced " +
-                "target/${native.rustTriple}/{debug,release}/${native.libFileName}."
+        val missing = required.filterNot { jvmNativeResDir.get().file(it).asFile.exists() }
+        check(missing.isEmpty()) {
+            "embedJvmNativeLib: native libraries $missing not found under " +
+                "${jvmNativeResDir.get().asFile.absolutePath}. The jvm jar would silently ship " +
+                "without them, causing UnsatisfiedLinkError at runtime instead of failing the " +
+                "build now. The host's comes from `cargo build` " +
+                "(target/${native.rustTriple}/{debug,release}/${native.libFileName}); the others " +
+                "from -PjvmPrebuiltNatives."
         }
     }
 }

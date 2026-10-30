@@ -12,22 +12,33 @@ jobs:
   # Just the Rust crate, host-only: the full Gradle build needs an iOS
   # target (macOS-only toolchain) and the Android NDK, which are covered by
   # the macOS runners in publish.yml/docs.yml instead. Keeping CI to
-  # `cargo test`/`cargo clippy` on Linux gives fast feedback on every PR.
+  # `cargo test`/`cargo clippy` gives fast feedback on every PR — tests on
+  # each desktop platform the jvm jar ships a native lib for besides macOS
+  # (which the Gradle builds cover), clippy once.
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      # JDK and Rust both come from mise.toml — do not restate versions here.
+      # Rust comes from mise.toml — do not restate its version here. The JDK
+      # it also pins isn't needed for cargo.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: rust
 
       # mise installs toolchains, not rustup components — the same split as
       # targets. This replaces rust-toolchain's `components: clippy` input.
       - name: Add clippy
+        if: matrix.os == 'ubuntu-latest'
         run: rustup component add clippy
 
       - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
 
       - run: cargo test
 
-      - run: cargo clippy -- -D warnings
+      - if: matrix.os == 'ubuntu-latest'
+        run: cargo clippy -- -D warnings

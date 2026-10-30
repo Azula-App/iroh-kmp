@@ -3,12 +3,73 @@ name: Publish
 on:
   push:
     tags: ["v*"]
+  # A dry run of the full release build, every jvm native included, that ends
+  # in publishToMavenLocal instead of Maven Central and uploads the jvm jar for
+  # inspection. Run it on main before pushing a tag.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  # The jvm jar carries a native lib for every desktop platform, but the macOS
+  # publish host can only build its own: Gobley's Linux/MinGW cross-builds fail
+  # there (see build.gradle.kts). So each of the others is built on a matching
+  # runner and handed to the publish job, which embeds it via
+  # -PjvmPrebuiltNatives — and refuses to publish if any is missing.
+  jvm-natives:
+    strategy:
+      matrix:
+        include:
+          # 22.04 rather than latest: a .so takes its glibc floor from the build
+          # host's glibc, so the oldest runner reaches the most distros.
+          - { runner: ubuntu-22.04, platform: linux-x86-64, lib: libiroh_kmp.so }
+          - { runner: ubuntu-22.04-arm, platform: linux-aarch64, lib: libiroh_kmp.so }
+          - { runner: windows-2025, platform: win32-x86-64, lib: iroh_kmp.dll }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # Rust only, still from mise.toml: plain cargo builds the lib, no JDK needed.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: rust
+
+      - uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+
+      # Just the cdylib JNA loads; `--lib` alone would also LTO the staticlib.
+      - run: cargo rustc --release --locked --lib --crate-type cdylib
+
+      # Load the lib the way JNA will and call one export, so an unresolvable
+      # dependency or a missing symbol fails here rather than in a consumer's app.
+      - name: Smoke-load the lib
+        shell: python
+        env:
+          LIB: target/release/${{ matrix.lib }}
+        run: |
+          import ctypes, os
+          lib = ctypes.CDLL(os.path.abspath(os.environ["LIB"]))
+          lib.ffi_iroh_kmp_uniffi_contract_version.restype = ctypes.c_uint32
+          print("uniffi contract version", lib.ffi_iroh_kmp_uniffi_contract_version())
+
+      - name: Report the glibc floor
+        if: runner.os == 'Linux'
+        run: objdump -T "target/release/${{ matrix.lib }}" | grep -oE 'GLIBC_[0-9.]+' | sort -uV | tail -1
+
+      - name: Stage at the JNA resource path
+        shell: bash
+        run: mkdir -p "natives/${{ matrix.platform }}" && cp "target/release/${{ matrix.lib }}" "natives/${{ matrix.platform }}/"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: jvm-native-${{ matrix.platform }}
+          path: natives/
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
+    needs: jvm-natives
     runs-on: macos-latest
     timeout-minutes: 120
     steps:
@@ -35,7 +96,16 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
 
+      # One dir laid out as <jna-platform-dir>/<lib>, which is what
+      # -PjvmPrebuiltNatives expects.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: jvm-native-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/jvm-natives
+
       - name: Derive version from tag
+        if: github.event_name == 'push'
         run: echo "VERSION_NAME=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
 
       # `publishAndReleaseToMavenCentral` uploads the deployment AND releases it
@@ -50,6 +120,7 @@ jobs:
       # env var keeps real newlines). Base64 has no newlines to lose, so it round-
       # trips intact; we decode it back to the armored form before Gradle reads it.
       - name: Publish
+        if: github.event_name == 'push'
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
@@ -58,7 +129,22 @@ jobs:
         run: |
           ORG_GRADLE_PROJECT_signingInMemoryKey="$(printf '%s' "$SIGNING_IN_MEMORY_KEY_BASE64" | base64 --decode)"
           export ORG_GRADLE_PROJECT_signingInMemoryKey
-          ./gradlew publishAndReleaseToMavenCentral -PVERSION_NAME="$VERSION_NAME" --no-configuration-cache
+          ./gradlew publishAndReleaseToMavenCentral -PVERSION_NAME="$VERSION_NAME" \
+            -PjvmPrebuiltNatives="$RUNNER_TEMP/jvm-natives" --no-configuration-cache
+
+      # The dry run: the same build with no signing key, into mavenLocal.
+      - name: Publish to mavenLocal (dry run)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          ./gradlew publishToMavenLocal -PjvmPrebuiltNatives="$RUNNER_TEMP/jvm-natives" \
+            --no-configuration-cache
+
+      - if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: iroh-kmp-jvm
+          path: build/libs/iroh-kmp-jvm-*.jar
+          if-no-files-found: error
 
   # The Maven Central upload above is the real release; this job only mirrors it
   # onto the GitHub Releases page, which otherwise stays empty — v0.1.0 was the
@@ -67,6 +153,7 @@ jobs:
   # macOS build never holds `contents: write`.
   release:
     needs: publish
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
