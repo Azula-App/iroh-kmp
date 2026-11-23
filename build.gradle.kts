@@ -226,10 +226,12 @@ android {
     ndkVersion = "28.0.13004108"
 
     // Gobley's UniFFI bindings call through JNA, which on Android needs its native
-    // dispatch lib. The plain `jna` jar Gobley pulls carries no Android .so, so we
-    // bundle libjnidispatch.so (per ABI, from the jna aar) directly into our AAR —
-    // this keeps the SDK self-contained: consumers need no manual jniLibs.
-    sourceSets.getByName("main").jniLibs.srcDir("src/androidMain/jniLibs")
+    // dispatch lib (libjnidispatch.so). Deliberately NOT bundled here: the POM
+    // already depends on net.java.dev.jna:jna with type aar, and that AAR ships
+    // libjnidispatch.so for every ABI. Bundling a second copy made consumers that
+    // honour the aar type (Kotlin Toolchain/Amper 0.12+) fail mergeNativeLibs with
+    // "2 files found with path 'lib/<abi>/libjnidispatch.so'". Verify with
+    // `unzip -l` on the AAR: it must contain no libjnidispatch.so.
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
